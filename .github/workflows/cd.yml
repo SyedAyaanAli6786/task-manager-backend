@@ -8,15 +8,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # ----------------------------------------------------
-    # 1. Checkout (optional but standard)
-    # ----------------------------------------------------
+    # --------------------------------------------
+    # 1. Checkout (standard)
+    # --------------------------------------------
     - name: Checkout source code
       uses: actions/checkout@v3
 
-    # ----------------------------------------------------
-    # 2. Deploy to EC2 via SSH
-    # ----------------------------------------------------
+    # --------------------------------------------
+    # 2. Deploy to EC2 using SSH
+    # --------------------------------------------
     - name: Deploy to EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -26,10 +26,10 @@ jobs:
         script: |
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
 
-          docker stop task-manager || true
-          docker rm task-manager || true
+          docker stop task-manager-backend || true
+          docker rm task-manager-backend || true
 
           docker run -d \
-            --name task-manager \
+            --name task-manager-backend \
             -p 8080:8080 \
             ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
