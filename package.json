@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "npm install && node index.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "build": "echo \"No build step required\"",
     "test": "jest"
   },
   "keywords": [],
