@@ -8,28 +8,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # --------------------------------------------
-    # 1. Checkout (standard)
-    # --------------------------------------------
-    - name: Checkout source code
+    - name: Checkout code
       uses: actions/checkout@v3
 
-    # --------------------------------------------
-    # 2. Deploy to EC2 using SSH
-    # --------------------------------------------
-    - name: Deploy to EC2
+    - name: Deploy Kubernetes Pod on EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
-
-          docker stop task-manager-backend || true
-          docker rm task-manager-backend || true
-
-          docker run -d \
-            --name task-manager-backend \
-            -p 8080:8080 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
+          kubectl delete pod task-manager-backend --ignore-not-found
+          kubectl apply -f k8s/pod.yaml
+          kubectl apply -f k8s/service.yaml || true
+          kubectl get pods
