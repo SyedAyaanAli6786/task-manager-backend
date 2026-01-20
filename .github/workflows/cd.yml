@@ -1,0 +1,35 @@
+name: Scaler demo deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # ----------------------------------------------------
+    # 1. Checkout (optional but standard)
+    # ----------------------------------------------------
+    - name: Checkout source code
+      uses: actions/checkout@v3
+
+    # ----------------------------------------------------
+    # 2. Deploy to EC2 via SSH
+    # ----------------------------------------------------
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
+
+          docker stop task-manager || true
+          docker rm task-manager || true
+
+          docker run -d \
+            --name task-manager \
+            -p 8080:8080 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
