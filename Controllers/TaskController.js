@@ -1,57 +1,64 @@
-const TaskModel = require("../Models/TaskModel");
-
-
-const createTask = async (req, res) => {
-    const data = req.body;
-    try {
-        const model = new TaskModel(data);
-        await model.save();
-        res.status(201)
-            .json({ message: 'Task is created', success: true });
-    } catch (err) {
-        res.status(500).json({ message: 'Failed to create task', success: false });
+let tasks = [
+    {
+        id: "1",
+        title: "Learn Jest",
+        completed: false
+    },
+    {
+        id: "2",
+        title: "Write unit tests",
+        completed: true
     }
-}
+];
 
-const fetchAllTasks = async (req, res) => {
-    try {
-        const data = await TaskModel.find({});
-        res.status(200)
-            .json({ message: 'All Tasks', success: true, data });
-    } catch (err) {
-        res.status(500).json({ message: 'Failed to get all tasks', success: false });
+// GET /tasks
+const fetchAllTasks = (req, res) => {
+    res.status(200).json(tasks);
+};
+
+// POST /tasks
+const createTask = (req, res) => {
+    const newTask = {
+        id: String(tasks.length + 1),
+        title: req.body.title,
+        completed: false
+    };
+
+    tasks.push(newTask);
+    res.status(201).json(newTask);
+};
+
+// PUT /tasks/:id
+const updateTaskById = (req, res) => {
+    const { id } = req.params;
+    const task = tasks.find(t => t.id === id);
+
+    if (!task) {
+        return res.status(404).json({ message: 'Task not found' });
     }
-}
 
+    task.title = req.body.title ?? task.title;
+    task.completed = req.body.completed ?? task.completed;
 
-const updateTaskById = async (req, res) => {
-    try {
-        const id = req.params.id;
-        const body = req.body;
-        const obj = { $set: { ...body } };
-        await TaskModel.findByIdAndUpdate(id, obj)
-        res.status(200)
-            .json({ message: 'Task Updated', success: true });
-    } catch (err) {
-        res.status(500).json({ message: 'Failed to updated task', success: false });
+    res.status(200).json(task);
+};
+
+// DELETE /tasks/:id
+const deleteTaskById = (req, res) => {
+    const { id } = req.params;
+    const index = tasks.findIndex(t => t.id === id);
+
+    if (index === -1) {
+        return res.status(404).json({ message: 'Task not found' });
     }
-}
 
-
-const deleteTaskById = async (req, res) => {
-    try {
-        const id = req.params.id;
-        await TaskModel.findByIdAndDelete(id);
-        res.status(200)
-            .json({ message: 'Task is deleted', success: true });
-    } catch (err) {
-        res.status(500).json({ message: 'Failed to delete task', success: false });
-    }
-}
+    const deletedTask = tasks.splice(index, 1);
+    res.status(200).json(deletedTask[0]);
+};
 
 module.exports = {
     createTask,
     fetchAllTasks,
     updateTaskById,
     deleteTaskById
-}
+};
