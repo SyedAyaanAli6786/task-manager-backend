@@ -105,13 +105,14 @@ jobs:
     # ----------------------------------------------------
     - name: Run container and test
       run: |
-        docker run -d -p 3000:3000 --name task-manager-backend \
+        docker run -d -p 8080:8080 --name task-manager-backend \
           ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
-        sleep 10
-        curl -f http://localhost:3000 || exit 1
-        docker stop node-test
-        docker rm node-test
-      # Reason: Ensures container is runnable
+        sleep 15
+        curl -f http://localhost:8080 || exit 1
+        docker logs task-manager-backend
+        docker stop task-manager-backend
+        docker rm task-manager-backend
+
 
     # ----------------------------------------------------
     # 12. DockerHub Login
