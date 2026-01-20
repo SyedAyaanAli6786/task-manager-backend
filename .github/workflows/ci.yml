@@ -105,7 +105,7 @@ jobs:
     # ----------------------------------------------------
     - name: Run container and test
       run: |
-        docker run -d -p 3000:3000 --name node-test \
+        docker run -d -p 3000:3000 --name task-manager-backend \
           ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
         sleep 10
         curl -f http://localhost:3000 || exit 1
