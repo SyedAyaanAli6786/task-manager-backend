@@ -87,7 +87,7 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/node-app:latest .
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest .
 
     # ----------------------------------------------------
     # 10. Trivy – Container Image Scan
@@ -95,7 +95,7 @@ jobs:
     - name: Run Trivy vulnerability scan
       uses: aquasecurity/trivy-action@0.24.0
       with:
-        image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/node-app:latest
+        image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
         format: 'sarif'
         output: 'trivy-results.sarif'
         severity: 'CRITICAL,HIGH'
@@ -112,7 +112,7 @@ jobs:
     - name: Run container and test
       run: |
         docker run -d -p 3000:3000 --name node-test \
-          ${{ secrets.DOCKERHUB_USERNAME }}/node-app:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
         sleep 10
         curl -f http://localhost:3000 || exit 1
         docker stop node-test
@@ -133,4 +133,4 @@ jobs:
     # ----------------------------------------------------
     - name: Push Docker image
       run: |
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/node-app:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
