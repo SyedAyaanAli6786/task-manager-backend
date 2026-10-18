@@ -137,3 +137,18 @@ a course project; in a team setting, the reviewer adds genuine value.
 
 **Tradeoff accepted**: Requires the app to not write to the container filesystem (except `/tmp`).
 Node.js does not write to the root filesystem during normal operation, so this is safe.
+
+---
+
+## ADR-008: In-memory storage and multiple replicas
+
+**Decision**: Keep tasks in process memory; run 2+ replicas behind one Service.
+
+**Reasoning**: The assignment scope is delivery and operations, not persistence, and the app
+ships without an active database. Keeping the app stateless-by-design (no local files) keeps
+rolling updates, rollbacks and HPA scaling simple.
+
+**Tradeoff accepted**: Each replica holds its own task list, so data created through one pod
+is not visible on another and is lost when a pod is replaced (rollout, rollback, crash).
+This was observed when verifying on kind. A production version would move storage to
+MongoDB (mongoose is already a dependency) and keep the Deployment unchanged.

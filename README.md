@@ -3,7 +3,7 @@
 A Node.js/Express REST API for managing tasks — built as an Advanced DevOps submission demonstrating CI/CD, Kubernetes, observability, and security practices.
 
 [![CI](https://github.com/SyedAyaanAli6786/task-manager-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/SyedAyaanAli6786/task-manager-backend/actions/workflows/ci.yml)
-[![Docker Hub](https://img.shields.io/docker/pulls/DOCKERHUB_USERNAME/task-manager-backend)](https://hub.docker.com/r/DOCKERHUB_USERNAME/task-manager-backend)
+[![Docker Hub](https://img.shields.io/docker/pulls/aliaayan6786/task-manager-backend)](https://hub.docker.com/r/aliaayan6786/task-manager-backend)
 
 ---
 
@@ -20,7 +20,7 @@ kind create cluster --name task-manager
 kubectl apply -f k8s/namespace.yaml
 helm upgrade --install task-manager ./helm/task-manager \
   --namespace task-manager \
-  --set image.repository="DOCKERHUB_USERNAME/task-manager-backend" \
+  --set image.repository="aliaayan6786/task-manager-backend" \
   --set image.tag="latest"
 
 # 3. Test
