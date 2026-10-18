@@ -1,131 +1,175 @@
-name: CI execution
+name: CI — Build, Test, Scan, Push
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, devops-improvements]
+    tags:     ['v*.*.*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   ci-pipeline:
+    name: CI Pipeline
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
-      security-events: write
+      security-events: write  # required for CodeQL and Trivy SARIF upload
 
     steps:
-    # ----------------------------------------------------
-    # 1. Checkout
-    # ----------------------------------------------------
-    - name: Checkout source code
-      uses: actions/checkout@v4
+      # ────────────────────────────────────────────────────────────────────────
+      # 1. Checkout
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-    # ----------------------------------------------------
-    # 2. Setup Node.js
-    # ----------------------------------------------------
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. Set up Node.js with npm cache
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
 
-    # ----------------------------------------------------
-    # 3. Install Dependencies
-    # ----------------------------------------------------
-    - name: Install dependencies
-      run: npm ci
-      # Reason: Clean, reproducible installs
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. Install dependencies
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+        # Reason: reproducible install from lockfile; fails on lockfile mismatch
 
-    # ----------------------------------------------------
-    # 4. Linting
-    # ----------------------------------------------------
-    - name: Run ESLint
-      run: npm run lint
-      continue-on-error: true
-      # Reason: Prevents technical debt without blocking pipeline
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. Lint
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true
+        # continue-on-error: prevents technical debt from blocking urgent fixes
 
-    # ----------------------------------------------------
-    # 5. SAST – CodeQL
-    # ----------------------------------------------------
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: javascript
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. SAST — CodeQL static analysis
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      # Reason: Detects OWASP Top 10 issues (XSS, injections)
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        # Detects OWASP Top-10 issues: XSS, injection, path traversal, etc.
 
-    # ----------------------------------------------------
-    # 6. SCA – Dependency Vulnerability Scan
-    # ----------------------------------------------------
-    - name: Run npm audit
-      run: npm audit --audit-level=high
-      continue-on-error: true
-      # Reason: Identifies vulnerable third-party libraries
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. SCA — dependency vulnerability scan
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+        # Reason: high-severity vulnerabilities are flagged but don't block;
+        # critical ones should be actioned but may not have a fix yet.
 
-    # ----------------------------------------------------
-    # 7. Unit Tests
-    # ----------------------------------------------------
-    - name: Run unit tests
-      run: npm test
-      # Reason: Prevents regressions
+      # ────────────────────────────────────────────────────────────────────────
+      # 7. Unit & integration tests
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Run tests
+        run: npm test
 
-    # ----------------------------------------------------
-    # 8. Build Application
-    # ----------------------------------------------------
-    - name: Build project
-      run: npm run build
-      # Skip if backend-only and no build step
+      # ────────────────────────────────────────────────────────────────────────
+      # 8. Determine image tags (latest + git SHA + optional semver)
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Compute image metadata
+        id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::8}"
+          REPO="${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend"
 
-    # ----------------------------------------------------
-    # 9. Docker Build
-    # ----------------------------------------------------
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+          TAGS="${REPO}:latest,${REPO}:sha-${SHORT_SHA}"
 
-    - name: Build Docker image
-      run: |
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest .
+          # If this is a semver tag push (e.g. v1.2.3), also tag with version
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            TAGS="${TAGS},${REPO}:${VERSION}"
+          fi
 
-    # ----------------------------------------------------
-    # 10. Trivy – Container Image Scan
-    # ----------------------------------------------------
-    - name: Trivy image scan
-      uses: aquasecurity/trivy-action@0.24.0
-      with:
-        image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
-        severity: CRITICAL,HIGH
-        exit-code: 0
+          echo "tags=${TAGS}"         >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "repo=${REPO}"         >> $GITHUB_OUTPUT
+        # Reason: every image has an immutable SHA tag so any running pod can
+        # be traced back to the exact commit that produced it.
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 9. Docker — login BEFORE build so push doesn't fail
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # ----------------------------------------------------
-    # 11. Runtime Container Smoke Test
-    # ----------------------------------------------------
-    - name: Run container and test
-      run: |
-        docker run -d -p 8080:8080 --name task-manager-backend \
-          ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
-        sleep 15
-        curl -f http://localhost:8080 || exit 1
-        docker logs task-manager-backend
-        docker stop task-manager-backend
-        docker rm task-manager-backend
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
+      # ────────────────────────────────────────────────────────────────────────
+      # 10. Build and push Docker image
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}   # don't push on PRs
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+        # Reason: APP_VERSION is baked into image so /health/ready reports the SHA
 
-    # ----------------------------------------------------
-    # 12. DockerHub Login
-    # ----------------------------------------------------
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # ────────────────────────────────────────────────────────────────────────
+      # 11. Container image scan — Trivy
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "${{ steps.meta.outputs.repo }}:sha-${{ steps.meta.outputs.short_sha }}"
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+          # exit-code=0: scan results appear in GitHub Security tab without
+          # blocking every push. A separate policy can fail on CRITICAL if needed.
 
-    # ----------------------------------------------------
-    # 13. Push Docker Image
-    # ----------------------------------------------------
-    - name: Push Docker image
-      run: |
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 12. Helm chart lint
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Lint Helm chart
+        run: helm lint helm/task-manager/
+        # Ensures the chart renders valid YAML and no broken template references
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 13. Runtime smoke test (only on non-PR, image was just pushed)
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Smoke test running container
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run -d -p 8080:8080 --name node-smoke \
+            -e NODE_ENV=production \
+            "${{ steps.meta.outputs.repo }}:sha-${{ steps.meta.outputs.short_sha }}"
+          sleep 8
+          curl -f http://localhost:8080/health/live  || (docker logs node-smoke && exit 1)
+          curl -f http://localhost:8080/health/ready || (docker logs node-smoke && exit 1)
+          curl -f http://localhost:8080/metrics      || (docker logs node-smoke && exit 1)
+          docker stop node-smoke && docker rm node-smoke
+        # Reason: validates health probes and /metrics endpoint work in the
+        # actual container before it reaches Kubernetes.

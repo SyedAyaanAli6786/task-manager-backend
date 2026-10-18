@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-manager-config
+  namespace: task-manager
+  labels:
+    app.kubernetes.io/name: task-manager
+    app.kubernetes.io/component: config
+data:
+  # Application runtime configuration — non-sensitive values only.
+  # Sensitive values (e.g. MONGODB_URI) must use a Secret, not a ConfigMap.
+  NODE_ENV:    "production"
+  PORT:        "8080"
+  LOG_LEVEL:   "info"
+  # APP_VERSION is injected at deploy time by the CI pipeline via --set app.version=<sha>
+  # APP_VERSION: set via Helm values, not hardcoded here
+  # Tracing: set OTEL_SDK_DISABLED=true to turn off tracing without rebuilding image
+  OTEL_SDK_DISABLED:     "false"
+  OTEL_SERVICE_NAME:     "task-manager-backend"

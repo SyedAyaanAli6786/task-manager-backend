@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-manager
+  namespace: task-manager
+  labels:
+    app.kubernetes.io/name: task-manager
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "latest"
+  annotations:
+    # Annotation updated by CI pipeline so kubectl diff shows the deploying SHA
+    deployment.kubernetes.io/revision: "1"
+spec:
+  # ── Replica count ─────────────────────────────────────────────────────────
+  # 2 replicas: survives a single pod failure without service interruption.
+  # Controlled by HPA in production (see hpa.yaml); this is the floor.
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-manager
+
+  # ── Release strategy: Rolling Update ──────────────────────────────────────
+  # maxUnavailable=0  → never reduce capacity during rollout (zero downtime)
+  # maxSurge=1        → spin up 1 extra pod before terminating old ones
+  # Why rolling over blue-green: app is stateless (in-memory), so no state
+  # divergence risk; rolling is simpler and uses fewer resources.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  # Retain last 5 ReplicaSets so we can roll back to any of the last 5 releases
+  revisionHistoryLimit: 5
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: task-manager
+        app.kubernetes.io/component: api
+      annotations:
+        # Prometheus auto-discovery — Prometheus scrapes pods with this annotation
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+        prometheus.io/path:   "/metrics"
+    spec:
+      # ── Security: pod-level ───────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000        # matches 'node' user in node:18-alpine
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault  # enables default seccomp filter (blocks ~300 syscalls)
+
+      # Evenly spread pods across nodes (soft preference)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: task-manager
+
+      containers:
+        - name: task-manager
+          # Image tag is overridden at deploy time by Helm --set image.tag=<sha>
+          image: DOCKERHUB_USERNAME/task-manager-backend:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # ── Environment — from ConfigMap + Secret ─────────────────────────
+          envFrom:
+            - configMapRef:
+                name: task-manager-config
+            # Uncomment when MongoDB is enabled:
+            # - secretRef:
+            #     name: task-manager-secrets
+
+          # APP_VERSION is patched in by CI so the running pod reports its git SHA
+          env:
+            - name: APP_VERSION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/version']
+
+          # ── Resource requests & limits ─────────────────────────────────────
+          # Requests: what Kubernetes reserves on the node (scheduler uses this)
+          # Limits:   hard cap — OOMKiller triggers if memory limit exceeded
+          # Sized for a lightweight Node.js API; adjust based on load testing.
+          resources:
+            requests:
+              cpu:    "50m"
+              memory: "64Mi"
+            limits:
+              cpu:    "200m"
+              memory: "256Mi"
+
+          # ── Health probes ──────────────────────────────────────────────────
+          # Startup probe: give the app time to initialise before liveness kicks in.
+          #   failureThreshold*periodSeconds = 50s total startup budget.
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+            successThreshold: 1
+            timeoutSeconds: 2
+
+          # Liveness probe: Is the process stuck/crashed? K8s will restart it.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+
+          # Readiness probe: Is the pod ready to receive traffic?
+          # K8s removes the pod from Service endpoints if this fails.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+
+          # ── Security: container-level ──────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]  # drop every Linux capability; add back only if needed
+
+          # ── Volume mounts ──────────────────────────────────────────────────
+          # readOnlyRootFilesystem=true means the app cannot write anywhere by default.
+          # /tmp is the only writable location, backed by an in-memory emptyDir.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # emptyDir lives and dies with the pod — no persistence, no shared state
+        - name: tmp
+          emptyDir:
+            medium: Memory    # in-memory, not disk — faster and leaves no traces
+            sizeLimit: 64Mi
+
+      # Graceful termination: give Node.js time to finish in-flight requests
+      terminationGracePeriodSeconds: 30

@@ -1,0 +1,114 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: task-manager-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: task-manager
+    # Label required for kube-prometheus-stack to pick up this rule
+    release: monitoring
+spec:
+  groups:
+    - name: task-manager.availability
+      interval: 30s
+      rules:
+        # ── Alert: No pods ready ───────────────────────────────────────────
+        - alert: TaskManagerDown
+          expr: |
+            kube_deployment_status_replicas_ready{
+              deployment="task-manager",
+              namespace="task-manager"
+            } == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Task Manager has no ready pods"
+            description: >
+              All pods in task-manager deployment are unavailable.
+              Check 'kubectl get pods -n task-manager' and recent events.
+            runbook_url: "https://github.com/SyedAyaanAli6786/task-manager-backend/blob/main/docs/runbook.md"
+
+        # ── Alert: Pod crash-looping ───────────────────────────────────────
+        - alert: TaskManagerCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="task-manager"
+            }[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Task Manager pod is crash-looping"
+            description: >
+              Pod {{ $labels.pod }} is restarting more than 0.1 times/second.
+              Check logs: kubectl logs {{ $labels.pod }} -n task-manager --previous
+
+    - name: task-manager.latency
+      interval: 30s
+      rules:
+        # ── Alert: High p99 latency ────────────────────────────────────────
+        - alert: TaskManagerHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{
+                job="task-manager-pods"
+              }[5m])) by (le, route)
+            ) > 1.0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Task Manager p99 latency exceeds 1s"
+            description: >
+              99th percentile latency for {{ $labels.route }} is
+              {{ $value | humanizeDuration }}. Investigate slow responses.
+
+    - name: task-manager.errors
+      interval: 30s
+      rules:
+        # ── Alert: High 5xx error rate ─────────────────────────────────────
+        - alert: TaskManagerHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{
+              job="task-manager-pods",
+              status_code=~"5.."
+            }[5m]))
+            /
+            sum(rate(http_requests_total{
+              job="task-manager-pods"
+            }[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Task Manager 5xx error rate > 5%"
+            description: >
+              Error rate is {{ $value | humanizePercentage }}.
+              Check recent pod logs for stack traces.
+
+    - name: task-manager.resources
+      interval: 60s
+      rules:
+        # ── Alert: Memory near limit ───────────────────────────────────────
+        - alert: TaskManagerHighMemory
+          expr: |
+            container_memory_working_set_bytes{
+              namespace="task-manager",
+              container="task-manager"
+            }
+            /
+            kube_pod_container_resource_limits{
+              namespace="task-manager",
+              resource="memory"
+            }
+            > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Task Manager memory usage > 85% of limit"
+            description: >
+              Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }}
+              of its memory limit. Risk of OOMKill.

@@ -1,2 +1,10 @@
 node_modules
 .env
+*.tgz
+.DS_Store
+kubectl
+# Local kind cluster config (contains credentials)
+kubeconfig
+kubeconfig.yaml
+# Helm dependency cache
+charts/
