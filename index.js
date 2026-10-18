@@ -77,7 +77,7 @@ app.use(bodyParser.json());
 app.use((req, res, next) => {
   const end = httpRequestDurationSeconds.startTimer();
   res.on('finish', () => {
-    const route = req.route ? req.route.path : req.path;
+    const route = req.route ? `${req.baseUrl}${req.route.path}`.replace(/\/$/, "") || "/" : req.path;
     const labels = { method: req.method, route, status_code: res.statusCode };
     end(labels);
     httpRequestsTotal.inc(labels);
