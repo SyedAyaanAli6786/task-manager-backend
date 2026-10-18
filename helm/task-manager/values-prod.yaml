@@ -1,0 +1,27 @@
+# values-prod.yaml — production overrides
+# Usage: helm upgrade --install task-manager ./helm/task-manager \
+#          -f helm/task-manager/values.yaml \
+#          -f helm/task-manager/values-prod.yaml \
+#          --set image.tag=<sha>
+
+replicaCount: 3
+
+resources:
+  requests:
+    cpu:    "100m"
+    memory: "128Mi"
+  limits:
+    cpu:    "500m"
+    memory: "512Mi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+
+app:
+  logLevel: warn     # quieter logs in prod to reduce I/O
+
+otel:
+  enabled: true      # enable tracing in production with a real collector

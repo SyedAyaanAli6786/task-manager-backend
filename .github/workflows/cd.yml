@@ -1,35 +1,131 @@
-name: Scaler demo deployment
+name: CD — Deploy to Kubernetes
 
 on:
+  # Manual trigger with optional image tag override
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. sha-abc1234 or v1.2.3). Defaults to latest.'
+        required: false
+        default: 'latest'
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options: [staging, production]
+
+  # Also triggered automatically after CI succeeds on main
+  workflow_run:
+    workflows: ["CI — Build, Test, Scan, Push"]
+    branches: [main]
+    types: [completed]
 
 jobs:
-  deploy:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Gate: only deploy if CI passed
+  # ──────────────────────────────────────────────────────────────────────────
+  check-ci:
+    name: Verify CI success
     runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      deploy: 'true'
+    steps:
+      - run: echo "CI passed — proceeding to deploy"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Deploy to Kubernetes via Helm
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Helm Deploy
+    runs-on: ubuntu-latest
+    needs: check-ci
+    # 'production' environment requires manual approval from a repository owner
+    # (configure in Settings → Environments → production → Required reviewers)
+    environment: ${{ github.event.inputs.environment || 'staging' }}
 
     steps:
-    # ----------------------------------------------------
-    # 1. Checkout (optional but standard)
-    # ----------------------------------------------------
-    - name: Checkout source code
-      uses: actions/checkout@v3
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-    # ----------------------------------------------------
-    # 2. Deploy to EC2 via SSH
-    # ----------------------------------------------------
-    - name: Deploy to EC2
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
+      # ── 2. Set image tag ─────────────────────────────────────────────────
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ "${{ github.event.inputs.image_tag }}" != "" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sha-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          fi
 
-          docker stop task-manager || true
-          docker rm task-manager || true
+      # ── 3. Install Helm ──────────────────────────────────────────────────
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
 
-          docker run -d \
-            --name task-manager \
-            -p 8080:8080 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend:latest
+      # ── 4. Configure kubectl (kubeconfig from GitHub Secret) ─────────────
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+        # The KUBECONFIG secret holds a base64-encoded kubeconfig.
+        # For kind: run: kind get kubeconfig | base64 -w0
+        # then save as KUBECONFIG in GitHub repository secrets.
+
+      # ── 5. Ensure namespace exists ───────────────────────────────────────
+      - name: Create namespace if absent
+        run: kubectl apply -f k8s/namespace.yaml
+
+      # ── 6. Helm upgrade (idempotent install-or-upgrade) ──────────────────
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install task-manager ./helm/task-manager \
+            --namespace task-manager \
+            --set image.repository="${{ secrets.DOCKERHUB_USERNAME }}/task-manager-backend" \
+            --set image.tag="${{ steps.tag.outputs.tag }}" \
+            --set app.version="${{ steps.tag.outputs.tag }}" \
+            --history-max 5 \
+            --wait \
+            --timeout 3m
+        # --wait: blocks until all pods are Ready (respects readiness probes)
+        # --history-max 5: keeps last 5 releases for rollback
+        # Why Helm over raw kubectl apply: idempotent, diff-able, rollback built-in
+
+      # ── 7. Verify rollout ─────────────────────────────────────────────────
+      - name: Verify deployment rollout
+        run: |
+          kubectl rollout status deployment/task-manager \
+            -n task-manager --timeout=3m
+
+      # ── 8. Post-deploy smoke test ─────────────────────────────────────────
+      - name: Smoke test deployed service
+        run: |
+          # Port-forward the service locally and test health endpoints
+          kubectl port-forward svc/task-manager 8080:80 -n task-manager &
+          PF_PID=$!
+          sleep 5
+          curl -f http://localhost:8080/health/live  || SMOKE_FAILED=true
+          curl -f http://localhost:8080/health/ready || SMOKE_FAILED=true
+          curl -f http://localhost:8080/tasks        || SMOKE_FAILED=true
+          kill $PF_PID 2>/dev/null || true
+
+          if [ "${SMOKE_FAILED}" = "true" ]; then
+            echo "Smoke test FAILED — triggering rollback"
+            helm rollback task-manager -n task-manager
+            exit 1
+          fi
+          echo "Smoke test PASSED"
+
+      # ── 9. Report deployed version ────────────────────────────────────────
+      - name: Report deployed version
+        if: success()
+        run: |
+          echo "✅ Deployed image tag: ${{ steps.tag.outputs.tag }}"
+          echo "✅ Helm release history:"
+          helm history task-manager -n task-manager --max 5

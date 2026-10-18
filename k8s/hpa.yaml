@@ -1,0 +1,49 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: task-manager
+  namespace: task-manager
+  labels:
+    app.kubernetes.io/name: task-manager
+    app.kubernetes.io/component: autoscaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: task-manager
+
+  # Floor and ceiling for replica count
+  minReplicas: 2   # always at least 2 for HA
+  maxReplicas: 5   # cap prevents runaway scaling from a spike or bug
+
+  metrics:
+    # Scale up when average CPU across all pods exceeds 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Scale up when average memory across all pods exceeds 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # Behaviour tuning: conservative scale-down to avoid flapping
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # wait 5 min of low load before scaling down
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60            # remove at most 1 pod per minute when scaling down
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60            # add at most 2 pods per minute when scaling up

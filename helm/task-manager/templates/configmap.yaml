@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "task-manager.fullname" . }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "task-manager.labels" . | nindent 4 }}
+data:
+  NODE_ENV:          {{ .Values.app.nodeEnv | quote }}
+  PORT:              {{ .Values.app.port | quote }}
+  LOG_LEVEL:         {{ .Values.app.logLevel | quote }}
+  OTEL_SERVICE_NAME: "task-manager-backend"
+  OTEL_SDK_DISABLED: {{ if .Values.otel.enabled }}"false"{{ else }}"true"{{ end }}

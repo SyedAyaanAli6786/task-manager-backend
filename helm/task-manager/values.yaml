@@ -1,0 +1,99 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# values.yaml — default values (development / local kind cluster)
+# Override specific values at deploy time with --set or a values file:
+#   helm upgrade --install task-manager ./helm/task-manager \
+#     --set image.tag=abc1234 \
+#     --set app.version=abc1234
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  repository: DOCKERHUB_USERNAME/task-manager-backend  # set to your Docker Hub username/repo
+  tag: latest                                           # overridden by CI with git SHA
+  pullPolicy: Always
+
+# ── Application config ────────────────────────────────────────────────────────
+app:
+  version: dev     # injected as APP_VERSION env var; overridden by CI with git SHA
+  port: 8080
+  nodeEnv: production
+  logLevel: info
+
+# ── Replica count ────────────────────────────────────────────────────────────
+replicaCount: 2
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu:    "50m"
+    memory: "64Mi"
+  limits:
+    cpu:    "200m"
+    memory: "256Mi"
+
+# ── HPA ───────────────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: task-manager.local
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+
+# ── Network Policy ────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ── Probes ────────────────────────────────────────────────────────────────────
+probes:
+  startup:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 10
+    timeoutSeconds: 2
+  liveness:
+    periodSeconds: 15
+    failureThreshold: 3
+    timeoutSeconds: 3
+  readiness:
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 3
+
+# ── Observability ─────────────────────────────────────────────────────────────
+otel:
+  enabled: false                       # set true when a collector is deployed
+  endpoint: "http://otel-collector:4318"
+
+# ── Rolling update strategy ───────────────────────────────────────────────────
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# ── Service ───────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 80
+
+# ── Security context ─────────────────────────────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  dropCapabilities: ["ALL"]
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+namespace: task-manager

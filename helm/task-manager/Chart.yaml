@@ -1,0 +1,23 @@
+apiVersion: v2
+name: task-manager
+description: >
+  Helm chart for the Task Manager Backend — a Node.js/Express REST API.
+  Manages Deployment, Service, Ingress, ConfigMap, HPA, and NetworkPolicy.
+
+type: application
+
+# Chart version — bump this on every chart change (independent of app version)
+version: 0.1.0
+
+# appVersion tracks the default application image tag.
+# Overridden at deploy time via --set image.tag=<git-sha>
+appVersion: "latest"
+
+keywords:
+  - task-manager
+  - nodejs
+  - rest-api
+
+maintainers:
+  - name: Syed Ayaan Ali
+    url: https://github.com/SyedAyaanAli6786
